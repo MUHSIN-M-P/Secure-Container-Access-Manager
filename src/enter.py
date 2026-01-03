@@ -218,8 +218,11 @@ def main():
     user = authenticate()
     if not user:
         return
-    container = input("Container to enter: ").strip()
-
+    # Check if container name provided as argument
+    if len(sys.argv) > 1:
+        container = sys.argv[1].strip()
+    else:
+        container = input("Container to enter: ").strip()
     ok, err = check_container_running(container)
     if not ok:
         print("Cannot enter:", err)
