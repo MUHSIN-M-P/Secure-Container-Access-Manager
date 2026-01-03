@@ -39,6 +39,9 @@ Secure Container Access Manager provides enterprise-grade security for Docker co
 
 2. **Install dependencies**
    ```bash
+   python3 -m venv .venv
+   source .venv/bin/activate # linux
+   source .venv/scripts/activate #windows
    pip install -r requirements.txt
    ```
 
