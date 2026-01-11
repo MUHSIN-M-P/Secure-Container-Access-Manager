@@ -13,10 +13,13 @@ from db import init_db, get_conn
 import docker
 import bcrypt
 
-# locations
-TYPESCRIPT_DIR = os.path.expanduser("~/project/container_sessions")
-os.makedirs(TYPESCRIPT_DIR, exist_ok=True)
-os.chmod(TYPESCRIPT_DIR, 0o700)  # restrict by default
+# System-wide session recording path
+TYPESCRIPT_DIR = "/var/log/secure-container-access/sessions"
+try:
+    os.makedirs(TYPESCRIPT_DIR, mode=0o750, exist_ok=True)
+except PermissionError:
+    print(f"Error: Cannot create {TYPESCRIPT_DIR}")
+    print("Run with sudo or ensure proper permissions.")
 
 def check_password(plain, hashed):
     return bcrypt.checkpw(plain.encode(), hashed)

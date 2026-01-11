@@ -1,10 +1,16 @@
 import sqlite3
 import os
 
-DB_PATH = os.path.expanduser("~/.secure_container_access.db")
+# All users must share the same auth database
+DB_PATH = "/var/lib/secure-container-access/db.sqlite"
 
 def get_conn():
-    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+    try:
+        os.makedirs(os.path.dirname(DB_PATH), mode=0o755, exist_ok=True)
+    except PermissionError:
+        print(f"Error: Cannot create {os.path.dirname(DB_PATH)}")
+        print("Run this script with sudo for first-time setup.")
+        raise
     conn = sqlite3.connect(DB_PATH, timeout=10, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     return conn
