@@ -76,8 +76,59 @@ def lock_docker_systemwide() -> bool:
     - This does NOT protect against root users
     - Requires removing developers from 'docker' group
     - Requires sudoers policy restricting 'docker' command
+    
+    Returns True if successful or if Docker is not managed by systemd.
     """
-    dropin_dir = "/etc/systemd/system/docker.service.d"
+    print("\n" + "=" * 60)
+    print("DOCKER LOCK SETUP")
+    print("=" * 60)
+    
+    # First, check if docker.service exists
+    rc, _ = _run_sudo(["sudo", "systemctl", "list-units", "--type=service", "--all"])
+    
+    # Try to find docker service name
+    docker_service = None
+    for service_name in ["docker.service", "docker", "snap.docker.dockerd.service"]:
+        rc, output = _run_sudo(["sudo", "systemctl", "status", service_name])
+        if rc == 0 or "could not be found" not in output.lower():
+            docker_service = service_name
+            print(f"Found Docker service: {docker_service}")
+            break
+    
+    if not docker_service:
+        print("⚠ Docker service not found in systemd.")
+        print("This is normal for:")
+        print("  - Docker Desktop on WSL2")
+        print("  - Docker installed without systemd integration")
+        print("")
+        print("⚠ WARNING: Cannot lock docker.sock via systemd.")
+        print("Will attempt manual socket permission lock instead...")
+        
+        # Try to lock the socket directly
+        if os.path.exists("/var/run/docker.sock"):
+            print("Locking /var/run/docker.sock to root-only (0600)...")
+            rc, msg = _run_sudo(["sudo", "chmod", "0600", "/var/run/docker.sock"])
+            if rc != 0:
+                print(f"✗ Failed to lock socket: {msg}")
+                print("⚠ Continuing anyway - manual intervention may be required.")
+                return True  # Don't fail setup
+            
+            rc, msg = _run_sudo(["sudo", "chown", "root:root", "/var/run/docker.sock"])
+            if rc != 0:
+                print(f"✗ Failed to change socket ownership: {msg}")
+            
+            rc, output = _run_sudo(["sudo", "ls", "-l", "/var/run/docker.sock"])
+            print(f"\nDocker socket permissions:\n{output}")
+            print("\n⚠ Socket locked manually (will reset on Docker restart)")
+            print("Consider using a proper Docker installation with systemd.")
+            return True
+        else:
+            print("✗ /var/run/docker.sock not found.")
+            print("⚠ Continuing anyway - Docker access control may not work.")
+            return True
+    
+    # Proceed with systemd-based locking
+    dropin_dir = f"/etc/systemd/system/{docker_service}.d"
     dropin_path = f"{dropin_dir}/scam-lock.conf"
     dropin_content = """[Service]
 # Force Docker socket to be root-only (Option 2A: gatekeeper enforcement)
@@ -85,10 +136,7 @@ ExecStartPost=/bin/chown root:root /var/run/docker.sock
 ExecStartPost=/bin/chmod 0600 /var/run/docker.sock
 """
 
-    print("\n" + "=" * 60)
-    print("DOCKER LOCK SETUP")
-    print("=" * 60)
-    print("Locking /var/run/docker.sock to root-only (0600)...")
+    print(f"Locking /var/run/docker.sock to root-only (0600) via {docker_service}...")
     print()
 
     # Create drop-in directory
@@ -114,13 +162,15 @@ ExecStartPost=/bin/chmod 0600 /var/run/docker.sock
     print("✓ Reloaded systemd")
 
     # Restart docker
-    print("Restarting Docker service...")
-    rc, msg = _run_sudo(["sudo", "systemctl", "restart", "docker"])
+    print(f"Restarting {docker_service}...")
+    rc, msg = _run_sudo(["sudo", "systemctl", "restart", docker_service])
     if rc != 0:
-        print(f"Failed to restart docker: {msg}")
-        return False
+        print(f"⚠ Failed to restart {docker_service}: {msg}")
+        print("Attempting to apply permissions manually...")
+        rc, msg = _run_sudo(["sudo", "chmod", "0600", "/var/run/docker.sock"])
+        rc, msg = _run_sudo(["sudo", "chown", "root:root", "/var/run/docker.sock"])
 
-    print("✓ Docker restarted")
+    print(f"✓ {docker_service} configuration updated")
 
     # Verify socket permissions
     rc, output = _run_sudo(["sudo", "ls", "-l", "/var/run/docker.sock"])
@@ -316,6 +366,73 @@ def setup_sudoers_automated() -> bool:
     
     return True
     
+def create_system_directories() -> bool:
+    """
+    Create required system directories with proper permissions.
+    Must be called with sudo privileges.
+    """
+    directories = [
+        ("/var/lib/secure-container-access", 0o755),
+        ("/var/log/secure-container-access/sessions", 0o750),
+    ]
+    
+    print("\n" + "=" * 60)
+    print("CREATING SYSTEM DIRECTORIES")
+    print("=" * 60)
+    
+    for dir_path, mode in directories:
+        print(f"Creating {dir_path}...")
+        rc, msg = _run_sudo(["sudo", "mkdir", "-p", dir_path])
+        if rc != 0:
+            print(f"✗ Failed to create {dir_path}: {msg}")
+            return False
+        
+        # Set permissions
+        rc, msg = _run_sudo(["sudo", "chmod", oct(mode)[2:], dir_path])
+        if rc != 0:
+            print(f"✗ Failed to set permissions on {dir_path}: {msg}")
+            return False
+        
+        print(f"✓ Created {dir_path} with permissions {oct(mode)}")
+    
+    print("✓ All system directories created successfully")
+    print("=" * 60 + "\n")
+    return True
+
+
+def check_required_commands() -> bool:
+    """Check if required system commands are available."""
+    required = ["systemctl", "groupadd", "usermod", "gpasswd", "getent"]
+    optional = ["script", "visudo", "docker"]
+    
+    print("\n" + "=" * 60)
+    print("CHECKING REQUIRED COMMANDS")
+    print("=" * 60)
+    
+    all_ok = True
+    for cmd in required:
+        if subprocess.run(["which", cmd], capture_output=True).returncode == 0:
+            print(f"✓ {cmd} found")
+        else:
+            print(f"✗ {cmd} NOT FOUND (REQUIRED)")
+            all_ok = False
+    
+    print("\nOptional commands:")
+    for cmd in optional:
+        if subprocess.run(["which", cmd], capture_output=True).returncode == 0:
+            print(f"✓ {cmd} found")
+        else:
+            print(f"⚠ {cmd} not found (optional, but recommended)")
+    
+    print("=" * 60 + "\n")
+    
+    if not all_ok:
+        print("✗ Missing required system commands. Please install them first.")
+        print("  Ubuntu/Debian: sudo apt install systemd coreutils")
+    
+    return all_ok
+
+
 def _print_header(title: str):
     print("\n" + "=" * 60)
     print(title)
@@ -323,17 +440,45 @@ def _print_header(title: str):
 
 
 def menu():
-    from db import init_db
-    import check_docker
-    import enter
-    import admin as admin_mod
-    import user as user_mod
-    from accounts import count_users, list_users
+    # Check required commands first
+    if not check_required_commands():
+        print("Cannot proceed without required system commands.")
+        sys.exit(1)
 
+    # Create system directories first (requires sudo)
+    if not create_system_directories():
+        print("✗ Failed to create system directories. Aborting.")
+        sys.exit(1)
+    
+    # Import modules that require dependencies
+    try:
+        from db import init_db
+        import check_docker
+        import enter
+        import admin as admin_mod
+        import user as user_mod
+        from accounts import count_users, list_users
+    except ImportError as e:
+        print(f"\n✗ Import error: {e}")
+        print("\nLikely cause: Running with sudo uses system Python, not your venv.")
+        print("\nSolutions:")
+        print("  1. Use venv's Python with sudo:")
+        print(f"     sudo {sys.executable} {os.path.abspath(__file__)}")
+        print("\n  2. Or if venv is in current directory:")
+        print(f"     sudo ./venv/bin/python3 {os.path.abspath(__file__)}")
+        print("\n  3. Install packages system-wide (NOT recommended):")
+        print("     sudo pip3 install -r requirements.txt")
+        sys.exit(1)
+    
     init_db()
 
     _print_header("Secure Container Access Manager")
-    check_docker.check()
+    
+    # Check Docker availability
+    if not check_docker.check():
+        print("\n✗ Docker is not available. Please install and start Docker first.")
+        print("Continuing anyway, but container operations will fail...\n")
+        # Don't exit - allow admin setup to continue
 
     if count_users(role="admin") == 0:
         _print_header("FIRST-TIME SETUP")
@@ -438,11 +583,26 @@ def menu():
 def main():
     _ensure_src_on_path()
 
+    # Check if running on Linux
+    if not sys.platform.startswith('linux'):
+        print("Error: This script is designed for Linux systems only.")
+        print(f"Current platform: {sys.platform}")
+        sys.exit(1)
+
     if not verify_linux_password_with_sudo():
         print("Aborting.")
         sys.exit(1)
 
-    menu()
+    try:
+        menu()
+    except KeyboardInterrupt:
+        print("\n\nInterrupted by user. Exiting...")
+        sys.exit(0)
+    except Exception as e:
+        print(f"\n\u2717 Fatal error: {e}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
 
 
 if __name__ == "__main__":

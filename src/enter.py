@@ -15,11 +15,15 @@ import bcrypt
 
 # System-wide session recording path
 TYPESCRIPT_DIR = "/var/log/secure-container-access/sessions"
-try:
-    os.makedirs(TYPESCRIPT_DIR, mode=0o750, exist_ok=True)
-except PermissionError:
-    print(f"Error: Cannot create {TYPESCRIPT_DIR}")
-    print("Run with sudo or ensure proper permissions.")
+
+# Don't fail on import if directory doesn't exist yet
+# It should be created by setup.py
+if not os.path.exists(TYPESCRIPT_DIR):
+    try:
+        os.makedirs(TYPESCRIPT_DIR, mode=0o750, exist_ok=True)
+    except PermissionError:
+        # Will fail later when trying to record, but allow import
+        pass
 
 def check_password(plain, hashed):
     return bcrypt.checkpw(plain.encode(), hashed)
@@ -113,6 +117,16 @@ def log_session_end(log_id):
     conn.close()
 
 def _safe_typescript_name(container_name, username):
+    """Generate safe typescript filename and ensure directory exists."""
+    # Ensure typescript directory exists
+    if not os.path.exists(TYPESCRIPT_DIR):
+        try:
+            os.makedirs(TYPESCRIPT_DIR, mode=0o750, exist_ok=True)
+        except PermissionError:
+            print(f"Error: Cannot create session recording directory {TYPESCRIPT_DIR}")
+            print("Please run 'sudo python3 setup.py' first to initialize the system.")
+            raise
+    
     safe = "".join(ch if (ch.isalnum() or ch in "-_.") else "_" for ch in f"{container_name}_{username}")
     ts_name = f"{safe}_{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}.log"
     return os.path.join(TYPESCRIPT_DIR, ts_name)

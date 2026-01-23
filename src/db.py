@@ -5,13 +5,22 @@ import os
 DB_PATH = "/var/lib/secure-container-access/db.sqlite"
 
 def get_conn():
+    # Directory should already exist from setup.py
+    # But try to create it anyway for compatibility
     try:
         os.makedirs(os.path.dirname(DB_PATH), mode=0o755, exist_ok=True)
     except PermissionError:
-        print(f"Error: Cannot create {os.path.dirname(DB_PATH)}")
-        print("Run this script with sudo for first-time setup.")
+        print(f"Error: Cannot access {os.path.dirname(DB_PATH)}")
+        print("Please run 'sudo python3 setup.py' first to initialize the system.")
         raise
-    conn = sqlite3.connect(DB_PATH, timeout=10, check_same_thread=False)
+    
+    try:
+        conn = sqlite3.connect(DB_PATH, timeout=10, check_same_thread=False)
+    except PermissionError:
+        print(f"Error: Cannot access database at {DB_PATH}")
+        print("Please run 'sudo python3 setup.py' first to initialize the system.")
+        raise
+    
     conn.row_factory = sqlite3.Row
     return conn
 
