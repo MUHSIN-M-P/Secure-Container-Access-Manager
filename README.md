@@ -258,13 +258,13 @@ sudo ./venv/bin/python3 src/admin.py delete-user
 ### For Users
 
 ```bash
-# Access a container
+# Access a container (primary usage)
 sudo ./venv/bin/python3 -m src <container_name>
 
 # Create a new user account
 sudo ./venv/bin/python3 src/user.py create
 
-# Delete your own account
+# Delete your own account (requires password confirmation)
 sudo ./venv/bin/python3 src/user.py delete
 ```
 

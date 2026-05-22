@@ -157,11 +157,12 @@ def spawn_and_record(container_name, username):
         print("Type 'exit' or Ctrl-D to finish the session.")
 
         if script_bin:
-            # Use script to record: script -q <ts_path> -c "docker exec -it <container> <shell>"
-            # For portability pass an explicit shell; we try bash first then sh.
+            # On Debian/Ubuntu util-linux, the output file must come LAST:
+            #   script -q -c "<command>" <outputfile>
+            # Placing it before -c (as was done before) causes the file argument
+            # to be misinterpreted as the command on some versions.
             for sh in shell_candidates:
-                cmd = ["script", "-q", ts_path, "-c", f"docker exec -it {container_name} {sh}"]
-                # run as subprocess so we can continue afterwards
+                cmd = ["script", "-q", "-c", f"docker exec -it {container_name} {sh}", ts_path]
                 rc = subprocess.call(cmd)
                 if rc == 0:
                     break
@@ -170,7 +171,7 @@ def spawn_and_record(container_name, username):
                 print("Failed to start shell inside container (tried bash/sh).")
                 return False
         else:
-            # fallback: pty.spawn approach using fork
+            # fallback: pty.fork approach — record raw bytes to logfile
             master_fd, slave_fd = pty.openpty()
             pid = os.fork()
             if pid == 0:
@@ -181,13 +182,17 @@ def spawn_and_record(container_name, username):
                 os.dup2(slave_fd, 2)
                 if slave_fd > 2:
                     os.close(slave_fd)
+                os.close(master_fd)  # child doesn't need the master end
                 # try each shell candidate; if bash not present docker will return non-zero and exit
                 for sh in shell_candidates:
                     os.execvp("docker", ["docker", "exec", "-it", container_name, sh])
                 # if exec returns, exit child
                 os._exit(127)
             else:
-                # parent: read from master_fd and write both to stdout and logfile
+                # parent: close slave_fd immediately — leaving it open in the parent
+                # prevents the child's PTY from receiving EOF when the child exits.
+                os.close(slave_fd)
+                # read from master_fd; write to stdout and logfile
                 with open(ts_path, "wb") as f:
                     try:
                         while True:
@@ -203,6 +208,7 @@ def spawn_and_record(container_name, username):
                             f.write(data)
                             f.flush()
                     finally:
+                        os.close(master_fd)  # close master FD to avoid leak
                         # ensure child cleaned up
                         try:
                             os.waitpid(pid, 0)

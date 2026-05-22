@@ -85,11 +85,8 @@ def remove_admin() -> bool:
         return False
 
     ok, msg = delete_user(username, role="admin")
-    if ok:
-        # Re-check after delete; still keep the last-admin protection as a guard.
-        if _count_admins() == 0:
-            print("Refusing to leave system without admins; rolling back isn't supported.")
-            print("Please recreate an admin immediately.")
+    # Note: the pre-delete len(admins)==1 guard above is the correct last-admin
+    # protection. A post-delete check cannot rollback, so it is omitted here.
     print(msg)
     return ok
 

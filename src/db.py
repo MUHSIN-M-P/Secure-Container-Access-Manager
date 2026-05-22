@@ -32,7 +32,7 @@ def init_db():
       id INTEGER PRIMARY KEY,
       username TEXT UNIQUE NOT NULL,
       password_hash BLOB NOT NULL,
-      role TEXT NOT NULL CHECK(role IN ('admin','user')),	--role constrain admin/user only possilbe 
+      role TEXT NOT NULL CHECK(role IN ('admin','user')),
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
     CREATE TABLE IF NOT EXISTS containers (
@@ -45,9 +45,9 @@ def init_db():
       id INTEGER PRIMARY KEY,
       username TEXT NOT NULL,
       container_name TEXT NOT NULL,
-      ts_start TIMESTAMP DEFAULT CURRENT_TIMESTAMP,	-- start time
-      ts_end TIMESTAMP,					-- end time
-      typescript_path TEXT NOT NULL			-- Path to session recording/script
+      ts_start TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      ts_end TIMESTAMP,
+      typescript_path TEXT NOT NULL
     );
     """)
     conn.commit()

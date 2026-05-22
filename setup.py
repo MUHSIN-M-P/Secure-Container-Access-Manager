@@ -2,12 +2,14 @@ import os
 import sys
 import getpass
 import subprocess
+import shutil
 
 def _ensure_src_on_path():
-    here = os.path.dirname(os.path.abspath(__file__)) #take current path
-    src_dir = os.path.join(here, "src") # adds src to that
-    if src_dir not in sys.path: # if not found such a path in sys.path 
-        sys.path.insert(0, src_dir) #this adding will simplify module import , wihtout worrying about directory, not a really needed function
+    """Add src directory to sys.path for module imports."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    src_dir = os.path.join(here, "src")
+    if src_dir not in sys.path:
+        sys.path.insert(0, src_dir)
 
 def verify_linux_password_with_sudo() -> bool:
     """
@@ -22,16 +24,14 @@ def verify_linux_password_with_sudo() -> bool:
     pw = getpass.getpass("Linux password (sudo): ")
 
     try:
-        # -S reads password from stdin
-        # -v validates cached credentials
+        # -S reads password from stdin, -v validates cached credentials
         p = subprocess.run(
             ["sudo", "-S", "-v"],
             input=(pw + "\n").encode(),
-            stdout=subprocess.PIPE, # Capture output
-            stderr=subprocess.PIPE, # Capture errors
-            check=False,    # Don't raise exception on error , we will do by code
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
         )
-        # on background it will run "echo "mycorrectpass" | sudo -S -v"
         if p.returncode == 0:
             return True
 
@@ -305,17 +305,21 @@ def setup_sudoers_automated() -> bool:
     Automatically create sudoers configuration.
     This writes /etc/sudoers.d/scam with proper permissions and validation.
     """
-    # Get absolute path to this script
+    # Get absolute paths
     script_path = os.path.abspath(__file__)
+    # Point sudoers at enter.py (the user-facing gatekeeper), not setup.py.
+    # setup.py is for root/admin only and must NOT be in the sudoers whitelist.
+    enter_path = os.path.join(os.path.dirname(script_path), "src", "enter.py")
     python_path = sys.executable
     
     sudoers_file = "/etc/sudoers.d/scam"
     sudoers_content = f"""# Secure Container Access Manager - Gatekeeper Policy
 # Created automatically by setup.py
 
-# Allow developers to run ONLY the wrapper, not docker directly
-# Replace %developers with your actual group name if different
-%developers ALL=(root) NOPASSWD: {python_path} {script_path}
+# Allow developers to run ONLY the container-access wrapper, not docker directly.
+# This covers running the module directly OR enter.py explicitly.
+%developers ALL=(root) NOPASSWD: {python_path} -m src *
+%developers ALL=(root) NOPASSWD: {python_path} {enter_path} *
 
 # Explicitly deny direct docker access to prevent bypass
 %developers ALL=(ALL) !/usr/bin/docker, !/usr/bin/docker-compose
@@ -411,7 +415,7 @@ def check_required_commands() -> bool:
     
     all_ok = True
     for cmd in required:
-        if subprocess.run(["which", cmd], capture_output=True).returncode == 0:
+        if shutil.which(cmd) is not None:
             print(f"✓ {cmd} found")
         else:
             print(f"✗ {cmd} NOT FOUND (REQUIRED)")
@@ -419,7 +423,7 @@ def check_required_commands() -> bool:
     
     print("\nOptional commands:")
     for cmd in optional:
-        if subprocess.run(["which", cmd], capture_output=True).returncode == 0:
+        if shutil.which(cmd) is not None:
             print(f"✓ {cmd} found")
         else:
             print(f"⚠ {cmd} not found (optional, but recommended)")

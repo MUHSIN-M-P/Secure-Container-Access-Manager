@@ -11,8 +11,10 @@ venv/
 # SQLite DB & logs
 *.db
 container_sessions/
-~/.secure_container_access.db
+.secure_container_access.db
 
 # OS / editor
 .DS_Store
 .vscode/
+INTERVIEW_PREP.md
+RESUME_ASSESSMENT.md
